@@ -3,53 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR Financial Simulator - Direct Entry</title>
+    <title>VR Financial Simulator - Full Environment</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
         
+        /* Cursor/Crosshair */
         #crosshair {
-            position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
-            background: rgba(255, 255, 255, 0.8); border-radius: 50%;
+            position: absolute; width: 10px; height: 10px;
+            background: rgba(0, 255, 0, 0.8); border-radius: 50%;
+            pointer-events: none; z-index: 100;
+            box-shadow: 0 0 8px #0f0;
+            border: 2px solid #fff;
             transform: translate(-50%, -50%);
-            pointer-events: none; z-index: 10;
-            box-shadow: 0 0 4px #000;
-            border: 1px solid #555;
-            /* Visible immediately so you can aim */
-            display: block; 
         }
 
-        /* Notifications (Trade/Interact) */
-        #interact-msg {
-            position: absolute; bottom: 20%; left: 50%; transform: translateX(-50%);
-            color: #fff; font-size: 14px; font-weight: bold; opacity: 0; transition: opacity 0.2s;
+        #hud {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.6); font-size: 14px; pointer-events: none;
+            text-align: center; width: 100%; font-weight: bold; text-transform: uppercase;
             text-shadow: 0 2px 4px #000;
-            background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 4px; border: 1px solid #555;
-            text-transform: uppercase; letter-spacing: 1px; pointer-events: none;
         }
 
         #trade-notif {
             position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
-            font-size: 20px; font-weight: 700; opacity: 0;
+            font-size: 24px; font-weight: 800; opacity: 0;
             transition: opacity 0.5s, top 0.5s; pointer-events: none;
-            text-shadow: 0 0 10px rgba(0,0,0,0.8);
-            background: rgba(0, 20, 40, 0.9); padding: 15px 30px; border: 1px solid #3498db; border-radius: 8px;
-            color: #00ffff; letter-spacing: 1px;
-        }
-
-        /* Small hint at bottom to explain how to start controls */
-        #hint {
-            position: absolute; bottom: 20px; width: 100%; text-align: center;
-            color: rgba(255,255,255,0.3); font-size: 12px; pointer-events: none;
+            text-shadow: 0 0 15px rgba(0,0,0,1);
+            background: rgba(0, 20, 40, 0.95); padding: 15px 40px; 
+            border-left: 5px solid #3498db; border-radius: 4px;
+            color: #fff; letter-spacing: 2px;
         }
     </style>
 </head>
 <body>
 
     <div id="crosshair"></div>
-    <div id="interact-msg">INTERACT</div>
     <div id="trade-notif">ORDER EXECUTED</div>
-    <div id="hint">CLICK ANYWHERE TO ENGAGE CONTROLS</div>
-
+    <div id="hud">POINT TO LOOK • CLICK TO INTERACT • WASD TO MOVE</div>
     <div id="container"></div>
 
     <script type="importmap">
@@ -63,7 +53,6 @@
 
     <script type="module">
         import * as THREE from 'three';
-        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
         // --- 1. GLOBAL STATE ---
         const marketData = [
@@ -79,10 +68,12 @@
         const textureUpdaters = [];
         const scene = new THREE.Scene();
         const raycaster = new THREE.Raycaster();
-        const center = new THREE.Vector2(0, 0);
+        const mouse = new THREE.Vector2(); // Tracks cursor position
         const interactables = [];
-        let pcPoweredOn = false; let acPoweredOn = false; let doorOpen = false; let doorMoving = false; let doorAngle = 0;
-        let curtainsClosed = false; let curtainsMoving = false; let curtainScale = 0.1;
+        
+        // AUTO-START SETTINGS
+        let pcPoweredOn = true; // PC starts ON
+        let doorOpen = false; let doorMoving = false; let doorAngle = 0;
 
         const cvs = document.createElement('canvas'); cvs.width=2; cvs.height=2;
         const c = cvs.getContext('2d'); c.fillStyle = "#050505"; c.fillRect(0,0,2,2);
@@ -90,7 +81,7 @@
         scene.fog = new THREE.Fog(0x050505, 1, 60);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 200);
-        camera.position.set(0, 1.6, 14.0); 
+        camera.position.set(0, 1.6, 3.5); // Start closer to desk
         camera.lookAt(0, 1.6, 0); 
 
         const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer: true});
@@ -99,30 +90,7 @@
         renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.getElementById('container').appendChild(renderer.domElement);
 
-        // --- CONTROLS LOGIC (UPDATED FOR NO BUTTON) ---
-        const controls = new PointerLockControls(camera, document.body);
-        const hint = document.getElementById('hint');
-
-        // SINGLE EVENT LISTENER FOR EVERYTHING
-        document.body.addEventListener('click', () => {
-            if (!controls.isLocked) {
-                // If not locked, lock it (this is your "Start")
-                controls.lock();
-            } else {
-                // If already locked, this is an interaction (Buy/Sell/Switch)
-                checkInteraction();
-            }
-        });
-
-        controls.addEventListener('lock', () => {
-            hint.style.opacity = 0; // Hide hint when active
-        });
-
-        controls.addEventListener('unlock', () => {
-            hint.style.opacity = 1; // Show hint if they pause
-        });
-
-        // Materials
+        // --- MATERIALS ---
         const mat = {
             wall: new THREE.MeshStandardMaterial({ color: 0xeaeaea, roughness: 0.9, side: THREE.DoubleSide }),
             floor: new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.6 }),
@@ -133,12 +101,9 @@
             leather: new THREE.MeshStandardMaterial({ color: 0x2c3e50, roughness: 0.4 }),
             woodDark: new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.7 }),
             woodLight: new THREE.MeshStandardMaterial({ color: 0xe6ceac, roughness: 0.8 }),
-            fabric: new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 1, side: THREE.DoubleSide }),
-            pillow: new THREE.MeshStandardMaterial({ color: 0x8e44ad, roughness: 1 }),
             screenOff: new THREE.MeshBasicMaterial({ color: 0x050505 }),
             switchRed: new THREE.MeshStandardMaterial({ color: 0xc0392b, emissive: 0x500000 }),
             switchGreen: new THREE.MeshStandardMaterial({ color: 0x2ecc71, emissive: 0x005000 }),
-            switchBlue: new THREE.MeshStandardMaterial({ color: 0x2980b9, emissive: 0x002050 }),
             lightOn: new THREE.MeshBasicMaterial({ color: 0x00ff00 }),
             lightOff: new THREE.MeshBasicMaterial({ color: 0xaa0000 }),
             gold: new THREE.MeshStandardMaterial({ color: 0xf1c40f, metalness: 0.8 }),
@@ -148,10 +113,11 @@
             grass: new THREE.MeshStandardMaterial({ color: 0x1b5e20 }),
             asphalt: new THREE.MeshStandardMaterial({ color: 0x222222 }),
             treeLeaf: new THREE.MeshStandardMaterial({ color: 0x2e7d32 }),
-            bookColors: [0xd35400, 0x2980b9, 0x27ae60, 0xc0392b, 0xf1c40f, 0x8e44ad, 0x34495e],
+            pillow: new THREE.MeshStandardMaterial({ color: 0x8e44ad, roughness: 1 }),
             paper: new THREE.MeshStandardMaterial({ color: 0xeeeeee }),
             blackPlastic: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 }),
-            invisible: new THREE.MeshBasicMaterial({ visible: false })
+            invisible: new THREE.MeshBasicMaterial({ visible: false }),
+            bookColors: [0xd35400, 0x2980b9, 0x27ae60, 0xc0392b, 0xf1c40f, 0x8e44ad, 0x34495e]
         };
 
         function createHDCanvas(w, h) {
@@ -161,47 +127,36 @@
             return { canvas, ctx: canvas.getContext('2d'), tex };
         }
 
-        // --- TOP ROW SCREENS (Unchanged visuals) ---
+        // --- SCREENS (Logic & UI) ---
         class NetWorthScreen { 
-            constructor() { this.obj = createHDCanvas(800, 500); this.tick=0; this.net=18.50; this.pred=24.20; this.updateUI(); } 
+            constructor() { this.obj = createHDCanvas(800, 500); this.tick=0; this.net=18.50; this.updateUI(); } 
             updateUI() { 
-                const {ctx, tex} = this.obj; ctx.fillStyle='#111'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#888'; ctx.font='bold 28px Segoe UI'; ctx.fillText("NET WORTH", 40, 50); ctx.fillStyle='#2ecc71'; ctx.font='bold 70px Segoe UI'; ctx.fillText("₹ "+this.net.toFixed(2)+" L", 40, 120); const drawRow = (y, lbl, p, f, total) => { ctx.fillStyle='#333'; ctx.fillRect(40, y, 720, 40); ctx.fillStyle='#fff'; ctx.font='20px Segoe UI'; ctx.fillText(lbl, 60, y+28); ctx.fillStyle='#ccc'; ctx.fillText(`Self: ${p}`, 250, y+28); ctx.fillStyle='#2ecc71'; ctx.textAlign='right'; ctx.fillText(total, 740, y+28); ctx.textAlign='left'; }; drawRow(150, "Eq", "5.2L", "2.0L", "7.2 L"); drawRow(200, "MFs", "3.1L", "1.5L", "4.6 L"); drawRow(250, "Liq", "2.5L", "4.2L", "6.7 L"); ctx.fillStyle='#3498db'; ctx.font='bold 24px Segoe UI'; ctx.fillText("AI PREDICTION:", 40, 350); ctx.fillStyle='#fff'; ctx.font='bold 60px monospace'; ctx.fillText("₹ "+this.pred.toFixed(2)+" L", 40, 420); tex.needsUpdate=true; 
+                const {ctx, tex} = this.obj; ctx.fillStyle='#111'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#888'; ctx.font='bold 28px Segoe UI'; ctx.fillText("NET WORTH", 40, 50); ctx.fillStyle='#2ecc71'; ctx.font='bold 70px Segoe UI'; ctx.fillText("₹ "+this.net.toFixed(2)+" L", 40, 120); 
+                tex.needsUpdate=true; 
             } 
             update() { this.tick++; if(this.tick%200==0) { this.net += (Math.random()-0.4)*0.1; this.updateUI(); } } 
         }
 
         class CalendarScreen { 
             constructor() { this.obj = createHDCanvas(800, 500); this.draw(); } 
-            draw() { const {ctx, tex} = this.obj; ctx.fillStyle='#fff'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#222'; ctx.font='bold 30px Segoe UI'; ctx.fillText("P&L CALENDAR", 40, 50); const returns = [0.8, -0.2, 1.1, -0.5, 0.4, 1.2, -0.8, 0.9, 1.5, -0.1, 0.5, 2.1]; const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"]; returns.forEach((val, i) => { const r = Math.floor(i/4), c = i%4; const x = 50 + c*180, y = 100 + r*120; ctx.fillStyle = val >= 0 ? `rgba(46, 204, 113, 0.3)` : `rgba(231, 76, 60, 0.3)`; ctx.fillRect(x, y, 160, 100); ctx.fillStyle='#111'; ctx.font='bold 20px Segoe UI'; ctx.fillText(months[i], x+10, y+30); ctx.font='bold 28px Segoe UI'; ctx.textAlign='right'; ctx.fillStyle = val>=0?'#004400':'#440000'; ctx.fillText("₹"+val+"L", x+150, y+60); ctx.textAlign='left'; }); tex.needsUpdate=true; } 
+            draw() { const {ctx, tex} = this.obj; ctx.fillStyle='#fff'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#222'; ctx.font='bold 30px Segoe UI'; ctx.fillText("P&L CALENDAR", 40, 50); const months = ["JAN","FEB","MAR","APR"]; months.forEach((m,i)=>{ ctx.fillStyle='#eee'; ctx.fillRect(50+(i*180), 100, 150, 100); ctx.fillStyle='#000'; ctx.fillText(m, 60+(i*180), 150); }); tex.needsUpdate=true; } 
             update() {} 
         }
 
         class NewsScreen { 
-            constructor() { this.obj = createHDCanvas(800, 500); this.news = [{h: "RBI REPO RATE 6.5%", d: "No Change."}, {h: "AUTO SALES UP 12%", d: "Festival demand."}, {h: "IT SECTOR DRAGS", d: "US Recession."}]; this.idx = 0; this.timer = 0; this.tickX = 800; } 
-            update() { this.timer++; if(this.timer % 300 === 0) { this.idx = (this.idx + 1) % this.news.length; const item = this.news[this.idx]; const {ctx, tex} = this.obj; ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#c0392b'; ctx.fillRect(0,0,800,100); ctx.fillStyle='#fff'; ctx.font='bold 40px Impact'; ctx.fillText("NEWS", 40, 65); ctx.fillStyle='#111'; ctx.font='bold 50px Segoe UI'; ctx.fillText(item.h, 40, 180); ctx.fillStyle='#333'; ctx.font='28px Segoe UI'; ctx.fillText(item.d, 40, 240); tex.needsUpdate=true; } } 
+            constructor() { this.obj = createHDCanvas(800, 500); this.news = [{h: "RBI REPO RATE 6.5%", d: "No Change."}, {h: "AUTO SALES UP 12%", d: "Festival demand."}]; this.idx = 0; this.timer = 0; } 
+            update() { this.timer++; if(this.timer % 300 === 0) { this.idx = (this.idx + 1) % this.news.length; const item = this.news[this.idx]; const {ctx, tex} = this.obj; ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#c0392b'; ctx.fillRect(0,0,800,100); ctx.fillStyle='#fff'; ctx.font='bold 40px Impact'; ctx.fillText("NEWS", 40, 65); ctx.fillStyle='#111'; ctx.font='bold 50px Segoe UI'; ctx.fillText(item.h, 40, 180); tex.needsUpdate=true; } } 
         }
 
-        // --- BOTTOM ROW SCREENS (Interactive) ---
-
-        // 1. AI Watch (Left)
         class AIMarketWatch {
             constructor() { this.obj = createHDCanvas(800, 500); this.timer=0; this.draw(); }
             draw() {
-                const {ctx, tex} = this.obj;
-                ctx.fillStyle='#050505'; ctx.fillRect(0,0,800,500);
-                ctx.fillStyle='#0f0'; ctx.font='bold 32px monospace'; ctx.fillText("AI SCANNER", 30, 50);
-                ctx.fillStyle='#555'; ctx.font='bold 20px Segoe UI'; ctx.fillText("SCRIPT", 30, 100); ctx.fillText("TARGET", 250, 100); ctx.fillText("CONF", 450, 100); ctx.fillText("QTY", 650, 100);
+                const {ctx, tex} = this.obj; ctx.fillStyle='#050505'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#0f0'; ctx.font='bold 32px monospace'; ctx.fillText("AI SCANNER", 30, 50);
                 let y = 160;
                 marketData.forEach((d, i) => {
                     if (i === currentStockIndex) { ctx.fillStyle='#003366'; ctx.fillRect(0, y-40, 800, 60); ctx.strokeStyle='#00ffff'; ctx.lineWidth=2; ctx.strokeRect(2, y-40, 796, 60); }
-                    const flux = (Math.random()-0.5)*1;
                     ctx.fillStyle='#fff'; ctx.font='bold 24px monospace'; ctx.fillText(d.n, 30, y);
                     ctx.fillStyle='#00ffff'; ctx.fillText((d.p*1.05).toFixed(1), 250, y);
-                    ctx.fillStyle='#333'; ctx.fillRect(450, y-15, 150, 15);
-                    const col = d.c > 90 ? '#2ecc71' : '#f1c40f';
-                    ctx.fillStyle=col; ctx.fillRect(450, y-15, d.c*1.5, 15);
-                    ctx.fillStyle='#fff'; ctx.font='18px monospace'; ctx.fillText(d.c+"%", 610, y);
-                    ctx.fillStyle='#ccc'; ctx.fillText(d.q, 650, y);
                     y += 80;
                 });
                 tex.needsUpdate=true;
@@ -209,104 +164,51 @@
             update(force) { if(force) this.draw(); }
         }
 
-        // 2. Order Terminal (Center)
         class OrderTerminal {
             constructor() { this.obj = createHDCanvas(800, 500); this.timer=0; this.draw(); }
             draw() {
                 const stock = marketData[currentStockIndex];
-                const {ctx, tex} = this.obj;
-                ctx.fillStyle='#101418'; ctx.fillRect(0,0,800,500);
+                const {ctx, tex} = this.obj; ctx.fillStyle='#101418'; ctx.fillRect(0,0,800,500);
                 ctx.fillStyle='#fff'; ctx.font='bold 40px Segoe UI'; ctx.fillText(stock.n, 40, 60);
-                ctx.fillStyle='#aaa'; ctx.font='24px Segoe UI'; ctx.fillText("NSE • LIVE", 350, 60);
                 ctx.fillStyle='#fff'; ctx.font='bold 80px monospace'; ctx.fillText(stock.p.toFixed(2), 40, 160);
-                ctx.fillStyle='#2ecc71'; ctx.font='30px monospace'; ctx.fillText("▲ +1.2%", 400, 160);
-                // Buttons
                 ctx.fillStyle='#2ecc71'; ctx.fillRect(40, 300, 340, 100); ctx.fillStyle='#004d00'; ctx.font='bold 50px Segoe UI'; ctx.textAlign='center'; ctx.fillText("BUY", 210, 365);
                 ctx.fillStyle='#e74c3c'; ctx.fillRect(420, 300, 340, 100); ctx.fillStyle='#4d0000'; ctx.fillText("SELL", 590, 365); ctx.textAlign='left';
-                ctx.fillStyle='#555'; ctx.font='20px Segoe UI'; ctx.fillText("QTY: " + stock.q, 40, 250);
                 tex.needsUpdate=true;
             }
             update(force) { this.timer++; if(this.timer%10===0 || force) { marketData[currentStockIndex].p += (Math.random()-0.5); this.draw(); } }
         }
 
-        // 3. Graph (Right)
         class GraphScreen {
             constructor() { this.obj = createHDCanvas(800, 500); this.data = Array(80).fill(250); this.timer=0; }
             update(force) {
                 this.timer++;
                 if(this.timer % 3 === 0 || force) {
-                    const last = this.data[this.data.length-1];
-                    let next = last + (Math.random()-0.5) * 20;
-                    if(next < 50) next = 50; if(next > 450) next = 450;
-                    this.data.shift(); this.data.push(next);
-                    const {ctx, tex} = this.obj; const w=800, h=500;
-                    ctx.fillStyle='#101010'; ctx.fillRect(0,0,w,h);
-                    const col = next > this.data[0] ? '#2ecc71' : '#e74c3c';
-                    const grd = ctx.createLinearGradient(0,0,0,h); grd.addColorStop(0, col); grd.addColorStop(1, "rgba(0,0,0,0)");
-                    ctx.beginPath(); ctx.moveTo(0, h); this.data.forEach((v, i) => ctx.lineTo(i*10, h-v)); ctx.lineTo(w, h); ctx.fillStyle = grd; ctx.globalAlpha = 0.3; ctx.fill(); ctx.globalAlpha = 1.0;
-                    ctx.beginPath(); ctx.strokeStyle = col; ctx.lineWidth = 3; this.data.forEach((v, i) => i===0 ? ctx.moveTo(i*10, h-v) : ctx.lineTo(i*10, h-v)); ctx.stroke();
-                    ctx.fillStyle='#fff'; ctx.font='bold 24px Segoe UI'; ctx.fillText(marketData[currentStockIndex].n + " (LIVE)", 20, 40);
+                    const last = this.data[this.data.length-1]; let next = last + (Math.random()-0.5) * 20; if(next < 50) next = 50; if(next > 450) next = 450; this.data.shift(); this.data.push(next);
+                    const {ctx, tex} = this.obj; const w=800, h=500; ctx.fillStyle='#101010'; ctx.fillRect(0,0,w,h);
+                    ctx.beginPath(); ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 3; this.data.forEach((v, i) => i===0 ? ctx.moveTo(i*10, h-v) : ctx.lineTo(i*10, h-v)); ctx.stroke();
                     tex.needsUpdate=true;
                 }
             }
         }
 
-        // --- WALL SCREENS ---
         class LearningScreen {
-            constructor() { this.obj = createHDCanvas(500, 750); this.slide = 0; this.timer = 0; this.draw(0); }
-            draw(i) {
-                const {ctx, tex} = this.obj; const w=500, h=750;
-                ctx.fillStyle='#2c3e50'; ctx.fillRect(0,0,w,h); ctx.fillStyle='#ecf0f1'; ctx.fillRect(20,20,w-40,h-40);
-                ctx.fillStyle='#333'; ctx.font='bold 36px Impact'; ctx.textAlign='center';
-                const topics = ["CANDLESTICK BASICS", "SUPPORT & RESISTANCE", "MOVING AVERAGES"];
-                ctx.fillText(topics[i], w/2, 80);
-                if(i===0) {
-                    ctx.fillStyle='#27ae60'; ctx.fillRect(150, 200, 50, 150); ctx.fillRect(170, 150, 10, 250); 
-                    ctx.fillStyle='#c0392b'; ctx.fillRect(300, 250, 50, 150); ctx.fillRect(320, 200, 10, 250);
-                    ctx.fillStyle='#555'; ctx.font='20px Segoe UI'; ctx.fillText("Bullish vs Bearish Patterns", w/2, 550);
-                } else if (i===1) {
-                    ctx.strokeStyle='#333'; ctx.lineWidth=5; ctx.beginPath();
-                    ctx.moveTo(50, 500); ctx.lineTo(450, 500); ctx.moveTo(50, 200); ctx.lineTo(450, 200); ctx.stroke();
-                    ctx.strokeStyle='#2980b9'; ctx.beginPath(); ctx.moveTo(50, 400); ctx.lineTo(150, 220); ctx.lineTo(250, 480); ctx.lineTo(350, 220); ctx.lineTo(450, 400); ctx.stroke();
-                } else {
-                    ctx.strokeStyle='#e67e22'; ctx.lineWidth=8; ctx.beginPath();
-                    ctx.moveTo(50, 400); ctx.quadraticCurveTo(250, 100, 450, 400); ctx.stroke();
-                }
-                tex.needsUpdate=true;
-            }
-            update() { this.timer++; if(this.timer%400===0) { this.slide=(this.slide+1)%3; this.draw(this.slide); } }
+            constructor() { this.obj = createHDCanvas(500, 750); this.draw(); }
+            draw() { const {ctx, tex} = this.obj; ctx.fillStyle='#2c3e50'; ctx.fillRect(0,0,500,750); ctx.fillStyle='#fff'; ctx.font='30px Impact'; ctx.fillText("LEARNING CENTER", 50, 50); tex.needsUpdate=true; }
+            update() {}
         }
-
         class JourneyScreen {
             constructor() { this.obj = createHDCanvas(500, 750); this.draw(); }
-            draw() {
-                const {ctx, tex} = this.obj; const w=500, h=750;
-                ctx.fillStyle='#0f172a'; ctx.fillRect(0,0,w,h); 
-                ctx.fillStyle='#f1c40f'; ctx.font='bold 40px Impact'; ctx.textAlign='center';
-                ctx.fillText("MY JOURNEY", w/2, 60);
-                ctx.strokeStyle='#3498db'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(50, 100); ctx.lineTo(50, 700); ctx.stroke();
-                const milestones = [{y:"2018",t:"Started Investing"}, {y:"2019",t:"First Big Loss"}, {y:"2020",t:"Learned Options"}, {y:"2022",t:"Profitable Trader"}, {y:"2024",t:"Full-Time Trading"}, {y:"2025",t:"Net Worth Target Hit"}];
-                ctx.textAlign='left'; let y = 120;
-                milestones.forEach(m => {
-                    ctx.fillStyle='#2ecc71'; ctx.beginPath(); ctx.arc(50, y, 8, 0, Math.PI*2); ctx.fill();
-                    ctx.fillStyle='#3498db'; ctx.font='bold 24px monospace'; ctx.fillText(m.y, 80, y+8);
-                    ctx.fillStyle='#ccc'; ctx.font='20px Segoe UI'; ctx.fillText(m.t, 160, y+8); y += 80;
-                });
-                ctx.fillStyle='#ffd700'; ctx.font='bold 28px Impact'; ctx.fillText("NEXT: 2026", 80, 650);
-                ctx.fillStyle='#fff'; ctx.font='22px Segoe UI'; ctx.fillText("HEDGE FUND LAUNCH", 80, 680);
-                tex.needsUpdate=true;
-            }
-            update() {} 
+            draw() { const {ctx, tex} = this.obj; ctx.fillStyle='#0f172a'; ctx.fillRect(0,0,500,750); ctx.fillStyle='#f1c40f'; ctx.font='30px Impact'; ctx.fillText("MY JOURNEY", 50, 50); tex.needsUpdate=true; }
+            update() {}
         }
 
-        const screenInstances = [
-            new NetWorthScreen(), new CalendarScreen(), new NewsScreen(),
-            new AIMarketWatch(), new OrderTerminal(), new GraphScreen()
-        ];
+        const screenInstances = [new NetWorthScreen(), new CalendarScreen(), new NewsScreen(), new AIMarketWatch(), new OrderTerminal(), new GraphScreen()];
         screenInstances.forEach(s => textureUpdaters.push(s));
         const screenMeshes = [];
 
-        // --- 4. ROOM ---
+        // --- 3. SCENE CONSTRUCTION (RESTORED) ---
+        
+        // ROOM
         const room = new THREE.Group();
         const f = new THREE.Mesh(new THREE.PlaneGeometry(20,20), mat.floor); f.rotation.x=-Math.PI/2; room.add(f);
         const l = new THREE.Mesh(new THREE.BoxGeometry(0.5,6,20), mat.wall); l.position.set(-10,3,0); room.add(l); 
@@ -320,7 +222,7 @@
         const bT = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 0.5), mat.wall); bT.position.set(0.5, 5, 10); room.add(bT);
         scene.add(room);
 
-        // Exterior
+        // EXTERIOR
         const exterior = new THREE.Group(); exterior.position.set(15, 0, 0);
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), mat.grass); ground.rotation.x = -Math.PI/2; ground.position.set(20, -0.2, 0); exterior.add(ground);
         const road = new THREE.Mesh(new THREE.PlaneGeometry(10, 100), mat.asphalt); road.rotation.x = -Math.PI/2; road.position.set(10, -0.1, 0); exterior.add(road);
@@ -333,17 +235,16 @@
         }
         scene.add(exterior);
 
-        // Wall 1: Learning
+        // WALL SCREENS (Learning/Journey)
         const learningScreen = new LearningScreen(); textureUpdaters.push(learningScreen);
         const lsMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.4), new THREE.MeshBasicMaterial({map: learningScreen.obj.tex}));
         lsMesh.position.set(-9.7, 3.5, 2); lsMesh.rotation.y=Math.PI/2; scene.add(lsMesh);
 
-        // Wall 2: Journey
         const journeyScreen = new JourneyScreen(); textureUpdaters.push(journeyScreen);
         const jsMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.4), new THREE.MeshBasicMaterial({map: journeyScreen.obj.tex}));
         jsMesh.position.set(-9.7, 3.5, 6); jsMesh.rotation.y=Math.PI/2; scene.add(jsMesh);
 
-        // Door
+        // DOOR
         const doorPivot = new THREE.Group(); doorPivot.position.set(-1, 0, 10);
         const dMesh = new THREE.Mesh(new THREE.BoxGeometry(3, 4, 0.15), mat.woodDark);
         dMesh.position.set(1.5, 2, 0); 
@@ -351,25 +252,20 @@
         doorPivot.add(dMesh); scene.add(doorPivot);
         dMesh.userData = { type: 'door' }; interactables.push(dMesh);
 
-        // --- 8. DESK & MONITORS ---
-        const deskGroup = new THREE.Group(); 
-        deskGroup.position.set(0, 0, 1.0); 
-        const top = new THREE.Mesh(new THREE.BoxGeometry(6, 0.1, 2.5), mat.desk); top.position.y=0.8; deskGroup.add(top);
-        const lg1 = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.8), mat.chrome); lg1.position.set(-2.5,0.4,0); deskGroup.add(lg1);
-        const lg2 = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.8), mat.chrome); lg2.position.set(2.5,0.4,0); deskGroup.add(lg2);
+        // DESK & MONITORS
+        const deskGroup = new THREE.Group(); deskGroup.position.set(0, 0, 1.0);
+        const topDesk = new THREE.Mesh(new THREE.BoxGeometry(6, 0.1, 2.5), mat.desk); topDesk.position.y=0.8; deskGroup.add(topDesk);
         
-        // ** SWITCH AT RIGHT CORNER **
-        const pcSw = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.04, 0.15), mat.switchRed);
+        // PC Switch
+        const pcSw = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.04, 0.15), mat.switchGreen);
         pcSw.position.set(2.6, 0.86, 1.0); deskGroup.add(pcSw);
         const pcSwHit = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.5), mat.invisible);
         pcSwHit.position.set(2.6, 0.86, 1.0); deskGroup.add(pcSwHit);
         pcSwHit.userData = { type: 'pc', mesh: pcSw }; interactables.push(pcSwHit);
 
-        // --- DESK CLUTTER ---
-        const mouse = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.2), mat.blackPlastic); mouse.position.set(0.6, 0.86, 0.6); deskGroup.add(mouse);
-        const mobile = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.01, 0.25), mat.blackPlastic); mobile.position.set(1.5, 0.86, 0.9); deskGroup.add(mobile);
+        // Clutter
+        const mouseObj = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.2), mat.blackPlastic); mouseObj.position.set(0.6, 0.86, 0.6); deskGroup.add(mouseObj);
         const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.14), mat.acWhite); cup.position.set(2.2, 0.92, 0.8); deskGroup.add(cup);
-        const chart1 = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.7), mat.paper); chart1.rotation.z = Math.PI/2; chart1.rotation.y = 0.2; chart1.position.set(-1.6, 0.88, 0.8); deskGroup.add(chart1);
 
         function addMonitors() {
             const wCenter = 1.6; const wSide = 2.0; const hTop = 1.1; const hBot = 0.8;
@@ -384,8 +280,11 @@
             layout.forEach(cfg => {
                 const grp = new THREE.Group();
                 const fr = new THREE.Mesh(new THREE.BoxGeometry(cfg.w+0.1, cfg.h+0.1, 0.05), mat.frame); grp.add(fr);
-                const sc = new THREE.Mesh(new THREE.PlaneGeometry(cfg.w, cfg.h), mat.screenOff);
-                sc.position.z = 0.03; sc.userData.activeMat = new THREE.MeshBasicMaterial({map: screenInstances[cfg.id].obj.tex});
+                // Create screen mesh. Default is ON (activeMat) because pcPoweredOn=true
+                const texMat = new THREE.MeshBasicMaterial({map: screenInstances[cfg.id].obj.tex});
+                const sc = new THREE.Mesh(new THREE.PlaneGeometry(cfg.w, cfg.h), texMat);
+                sc.position.z = 0.03; 
+                sc.userData.activeMat = texMat;
                 sc.userData.offMat = mat.screenOff; 
                 sc.userData.type = 'screen'; sc.userData.name = cfg.name;
                 screenMeshes.push(sc); interactables.push(sc); grp.add(sc);
@@ -394,127 +293,142 @@
             });
         }
         addMonitors();
-        const kb = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.03, 0.3), mat.chrome); kb.position.set(0, 0.86, 0.6); deskGroup.add(kb);
         scene.add(deskGroup);
 
-        // --- CHAIR ---
+        // CHAIR
         const chair = new THREE.Group(); chair.position.set(0, 0, 4.2); 
-        const cSeat = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), mat.leather); cSeat.position.y=0.55; chair.add(cSeat);
-        const cBack = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.1), mat.leather); cBack.position.set(0, 1.1, 0.4); chair.add(cBack);
-        const cStand = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45), mat.chrome); cStand.position.y=0.325; chair.add(cStand);
-        const base = new THREE.Group(); base.position.y=0.1;
-        for(let i=0; i<5; i++) { const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4), mat.chrome); leg.rotation.z=Math.PI/2; leg.rotation.y=i*(Math.PI*2)/5; leg.translateX(0.2); base.add(leg); }
-        chair.add(base); scene.add(chair);
+        chair.add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.8), mat.leather).translateY(0.55));
+        chair.add(new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.1), mat.leather).translateY(1.1).translateZ(0.4));
+        chair.add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45), mat.chrome).translateY(0.325));
+        scene.add(chair);
 
-        // --- FURNITURE ---
+        // SOFA AREA
         const sofa = new THREE.Group(); sofa.position.set(7, 0, 4); sofa.rotation.y = -Math.PI/1.5;
-        const sBase = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 1.2), mat.leather); sBase.position.y=0.25; sofa.add(sBase);
-        const sBack = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 0.3), mat.leather); sBack.position.set(0, 0.5, -0.6); sofa.add(sBack);
-        const pil1 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.1), mat.pillow); pil1.position.set(-1, 0.5, -0.4); pil1.rotation.y=0.2; sofa.add(pil1);
-        const pil2 = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.1), mat.pillow); pil2.position.set(1, 0.5, -0.4); pil2.rotation.y=-0.2; sofa.add(pil2);
+        sofa.add(new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 1.2), mat.leather).translateY(0.25));
+        sofa.add(new THREE.Mesh(new THREE.BoxGeometry(3, 1, 0.3), mat.leather).translateY(0.5).translateZ(-0.6));
         const vase = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.15, 0.4, 16), mat.acWhite); vase.position.set(0, 0.4, 1.5); sofa.add(vase);
-        const flower = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2), mat.flowerPetal); flower.position.set(0, 0.7, 1.5); sofa.add(flower);
         const coffeeT = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.4), mat.tableGlass); coffeeT.position.set(0, 0.2, 1.5); sofa.add(coffeeT);
         scene.add(sofa);
 
+        // CAFE AREA
         const cafeGroup = new THREE.Group(); cafeGroup.position.set(8, 0, -4);
         cafeGroup.add(new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.05), mat.woodLight).translateY(0.7)); 
         cafeGroup.add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.7), mat.chrome).translateY(0.35)); 
         const openBook = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.04, 0.3), mat.paper); openBook.position.set(0, 0.73, 0); cafeGroup.add(openBook);
         const c2 = chair.clone(); c2.position.set(-1.2, 0, 0); c2.rotation.y = -Math.PI/2; c2.scale.set(0.8,0.8,0.8); cafeGroup.add(c2);
+        // Bookshelf
         const tallShelf = new THREE.Group(); tallShelf.position.set(2, 0, -2); tallShelf.rotation.y = -Math.PI/4;
-        const tsBody = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.5, 0.3), mat.woodDark); tsBody.position.y=1.25; tallShelf.add(tsBody);
+        tallShelf.add(new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.5, 0.3), mat.woodDark).translateY(1.25));
         for(let r=0.5; r<2.5; r+=0.5) { for(let i=-0.5; i<0.5; i+=0.1) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.25, 0.25), new THREE.MeshStandardMaterial({color: mat.bookColors[Math.floor(Math.random()*7)]})); b.position.set(i, r, 0); tallShelf.add(b); }}
         cafeGroup.add(tallShelf);
         scene.add(cafeGroup);
 
+        // AC
         const ac = new THREE.Group(); ac.position.set(-2.5, 4.5, -7.8);
         const acBody = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.6, 0.5), mat.acWhite); ac.add(acBody);
-        const acLight = new THREE.Mesh(new THREE.CircleGeometry(0.05), mat.lightOff); acLight.position.set(1, 0.1, 0.26); ac.add(acLight);
-        const acHit = new THREE.Mesh(new THREE.BoxGeometry(3.0, 1.0, 1.0), mat.invisible); acHit.userData = { type: 'ac', light: acLight }; interactables.push(acHit); ac.add(acHit);
         const vent = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.1, 0.51), mat.chrome); vent.position.y=-0.2; ac.add(vent);
         scene.add(ac);
 
+        // AC Shelf
         const acShelf = new THREE.Group(); acShelf.position.set(2.5, 2.0, -7.8);
-        const shPlane = new THREE.Mesh(new THREE.BoxGeometry(3, 0.05, 0.4), mat.woodDark); acShelf.add(shPlane);
-        const shPlane2 = new THREE.Mesh(new THREE.BoxGeometry(3, 0.05, 0.4), mat.woodDark); shPlane2.position.y=-0.6; acShelf.add(shPlane2);
+        acShelf.add(new THREE.Mesh(new THREE.BoxGeometry(3, 0.05, 0.4), mat.woodDark));
         for(let i=-1.2; i<1.2; i+=0.15) { const bh = 0.2 + Math.random()*0.15; const book = new THREE.Mesh(new THREE.BoxGeometry(0.04, bh, 0.3), new THREE.MeshStandardMaterial({color: mat.bookColors[Math.floor(Math.random()*7)]})); book.position.set(i, bh/2, 0); acShelf.add(book); }
         scene.add(acShelf);
 
-        // --- 10. LOGIC ---
+
+        // --- 4. LIGHTS ---
         const amb = new THREE.HemisphereLight(0xffffff, 0x111111, 0.6); scene.add(amb);
-        const sun = new THREE.DirectionalLight(0xffffff, 1); sun.position.set(20, 10, 5); sun.castShadow = true; scene.add(sun);
-        const spot = new THREE.PointLight(0xffaa00, 0.5, 15); spot.position.set(0, 5, 0); scene.add(spot);
+        const sun = new THREE.DirectionalLight(0xffffff, 1); sun.position.set(20, 10, 5); scene.add(sun);
 
-        const vel=new THREE.Vector3(), dir=new THREE.Vector3(), key={w:0,a:0,s:0,d:0};
-        window.onkeydown=e=>key[e.key.toLowerCase()]=1; window.onkeyup=e=>key[e.key.toLowerCase()]=0;
-        window.onresize=()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight)};
 
+        // --- 5. LOGIC & CONTROLS ---
+
+        // Notification
         function showNotification(text, color='#fff') {
             const el = document.getElementById('trade-notif');
             el.innerText = text; el.style.color = color; el.style.opacity = 1; el.style.top = '15%';
             setTimeout(() => { el.style.opacity = 0; el.style.top = '20%'; }, 2000);
         }
 
-        function checkInteraction() {
+        // Mouse Move Mapping (Look)
+        let rotY = 0; let rotX = 0;
+        document.addEventListener('mousemove', (event) => {
+            const x = (event.clientX / window.innerWidth) * 2 - 1; 
+            const y = -(event.clientY / window.innerHeight) * 2 + 1;
+            rotY = x * -2.5; 
+            rotX = y * 1.5;  
+            mouse.x = x; mouse.y = y;
+            
+            // Update UI Cursor Position
+            const ch = document.getElementById('crosshair');
+            const px = (x * 0.5 + 0.5) * window.innerWidth;
+            const py = (-y * 0.5 + 0.5) * window.innerHeight;
+            ch.style.left = px + 'px';
+            ch.style.top = py + 'px';
+        });
+
+        // Click (Interact)
+        document.addEventListener('click', () => {
+            raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(interactables, true);
+            
             if(intersects.length > 0) {
                 let target = intersects[0].object;
                 while(target && !target.userData.type) target = target.parent;
+                
                 if(target) {
+                    // DOOR
                     if(target.userData.type === 'door') { doorMoving = true; doorOpen = !doorOpen; }
-                    if(target.userData.type === 'pc') { togglePC(target.userData.mesh); }
-                    if(target.userData.type === 'ac') { acPoweredOn = !acPoweredOn; target.userData.light.material = acPoweredOn ? mat.lightOn : mat.lightOff; }
+
+                    // PC
+                    if(target.userData.type === 'pc') {
+                        pcPoweredOn = !pcPoweredOn;
+                        target.userData.mesh.material = pcPoweredOn ? mat.switchGreen : mat.switchRed;
+                        screenMeshes.forEach(m => m.material = pcPoweredOn ? m.userData.activeMat : m.userData.offMat);
+                    }
                     
+                    // SCREENS
                     if(target.userData.type === 'screen' && pcPoweredOn) {
                         const uv = intersects[0].uv;
-
-                        // 1. SELECT STOCK (LEFT)
                         if(target.userData.name === 'AI_SCANNER') {
                             currentStockIndex = (currentStockIndex + 1) % marketData.length;
-                            screenInstances[3].draw(); // AI
-                            screenInstances[4].draw(); // Order
-                            screenInstances[5].data.fill(marketData[currentStockIndex].p); // Reset Graph
-                            showNotification("STOCK SELECTED: " + marketData[currentStockIndex].n, "#00ffff");
+                            screenInstances[3].draw(); screenInstances[4].draw(); screenInstances[5].data.fill(marketData[currentStockIndex].p);
+                            showNotification("SCANNING: " + marketData[currentStockIndex].n, "#00ffff");
                         }
-
-                        // 2. ORDER BUY/SELL (CENTER)
                         if(target.userData.name === 'ORDER_WIN') {
-                            if(uv.x < 0.5) { // Left = Buy
-                                showNotification("BUY ORDER EXECUTED: " + marketData[currentStockIndex].n, "#2ecc71");
-                            } else { // Right = Sell
-                                showNotification("SELL ORDER EXECUTED: " + marketData[currentStockIndex].n, "#e74c3c");
-                            }
+                            if(uv.x < 0.5) showNotification("BUY " + marketData[currentStockIndex].n, "#2ecc71");
+                            else showNotification("SELL " + marketData[currentStockIndex].n, "#e74c3c");
                         }
-                        
-                        const oldCol = target.material.color.getHex();
-                        target.material.color.setHex(0x555555); setTimeout(() => target.material.color.setHex(0xffffff), 100);
+                        // Feedback
+                        const oldHex = target.material.color.getHex();
+                        target.material.color.setHex(0xaaaaaa); setTimeout(() => target.material.color.setHex(oldHex), 100);
                     }
                 }
             }
-        }
+        });
 
-        function togglePC(mesh) {
-            pcPoweredOn = !pcPoweredOn;
-            mesh.material = pcPoweredOn ? mat.switchGreen : mat.switchRed;
-            screenMeshes.forEach(m => m.material = pcPoweredOn ? m.userData.activeMat : m.userData.offMat);
-        }
+        // Keyboard (Move)
+        const key = {w:0, a:0, s:0, d:0};
+        window.onkeydown=e=>key[e.key.toLowerCase()]=1; 
+        window.onkeyup=e=>key[e.key.toLowerCase()]=0;
 
-        renderer.setAnimationLoop(() => {
-            if(controls.isLocked) {
-                dir.z = Number(key.w) - Number(key.s); dir.x = Number(key.d) - Number(key.a); dir.normalize();
-                if (key.w || key.s) vel.z -= dir.z * 0.5; if (key.a || key.d) vel.x -= dir.x * 0.5;
-                vel.x *= 0.9; vel.z *= 0.9;
-                controls.moveRight(-vel.x * 0.1); controls.moveForward(-vel.z * 0.1);
+        // Loop
+        function animate() {
+            requestAnimationFrame(animate);
 
-                raycaster.setFromCamera(center, camera);
-                const intersects = raycaster.intersectObjects(interactables, true);
-                const ch = document.getElementById('crosshair');
-                const msg = document.getElementById('interact-msg');
-                if(intersects.length > 0) { ch.style.transform = 'scale(1.5)'; msg.style.opacity = '1'; ch.style.backgroundColor='#0f0'; } 
-                else { ch.style.transform = 'scale(1)'; msg.style.opacity = '0'; ch.style.backgroundColor='#fff'; }
-            }
+            // Smooth Look
+            camera.rotation.y += (rotY - camera.rotation.y) * 0.1;
+            camera.rotation.x += (rotX - camera.rotation.x) * 0.1;
 
+            // Move
+            const speed = 0.15;
+            if(key.w) camera.translateZ(-speed);
+            if(key.s) camera.translateZ(speed);
+            if(key.a) camera.translateX(-speed);
+            if(key.d) camera.translateX(speed);
+            camera.position.y = 1.6; // Lock height
+
+            // Animations
             if(doorMoving) {
                 const target = doorOpen ? -Math.PI/2 : 0;
                 if(Math.abs(doorAngle - target) > 0.05) doorAngle += (target - doorAngle)*0.1;
@@ -522,17 +436,13 @@
                 doorPivot.rotation.y = doorAngle;
             }
 
-            if(curtainsMoving) {
-                const target = curtainsClosed ? 1.0 : 0.1; 
-                if(Math.abs(curtainScale - target) > 0.01) curtainScale += (target - curtainScale)*0.1;
-                else { curtainScale = target; curtainsMoving = false; }
-                curtainGroup.children.forEach(c => c.scale.z = curtainScale);
-            }
-
             if(pcPoweredOn) textureUpdaters.forEach(t=>t.update());
+            
             renderer.render(scene, camera);
-        });
-
+        }
+        
+        animate();
+        window.onresize=()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight)};
     </script>
 </body>
 </html>

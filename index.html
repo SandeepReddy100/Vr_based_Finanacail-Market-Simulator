@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR Financial Simulator - Final</title>
+    <title>VR Financial Simulator - Direct Entry</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
         
@@ -14,38 +14,11 @@
             pointer-events: none; z-index: 10;
             box-shadow: 0 0 4px #000;
             border: 1px solid #555;
-            display: none; /* Hidden until started */
+            /* Visible immediately so you can aim */
+            display: block; 
         }
 
-        #hud {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            z-index: 20; color: #fff; text-align: center;
-        }
-
-        .hud-content {
-            background: rgba(10, 15, 20, 0.95);
-            padding: 40px 60px; border-radius: 12px;
-            border: 1px solid #444;
-            box-shadow: 0 0 60px rgba(0,150,255,0.15);
-        }
-
-        .title { font-size: 28px; font-weight: 800; color: #3498db; letter-spacing: 2px; margin-bottom: 20px; }
-        .instr { font-size: 14px; color: #ccc; line-height: 1.6; margin-bottom: 30px; }
-        .key { background: #333; padding: 2px 8px; border-radius: 4px; color: #fff; border: 1px solid #777; font-size: 11px; }
-        
-        #start-btn {
-            background: linear-gradient(135deg, #2ecc71, #27ae60);
-            border: none; padding: 15px 40px; color: white; font-size: 18px; font-weight: bold;
-            border-radius: 30px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
-            box-shadow: 0 4px 15px rgba(46, 204, 113, 0.4);
-            transition: transform 0.2s, box-shadow 0.2s;
-            pointer-events: auto; /* Ensure this is clickable */
-        }
-        #start-btn:hover { transform: scale(1.05); box-shadow: 0 6px 20px rgba(46, 204, 113, 0.6); }
-        #start-btn:active { transform: scale(0.95); }
-
+        /* Notifications (Trade/Interact) */
         #interact-msg {
             position: absolute; bottom: 20%; left: 50%; transform: translateX(-50%);
             color: #fff; font-size: 14px; font-weight: bold; opacity: 0; transition: opacity 0.2s;
@@ -62,6 +35,12 @@
             background: rgba(0, 20, 40, 0.9); padding: 15px 30px; border: 1px solid #3498db; border-radius: 8px;
             color: #00ffff; letter-spacing: 1px;
         }
+
+        /* Small hint at bottom to explain how to start controls */
+        #hint {
+            position: absolute; bottom: 20px; width: 100%; text-align: center;
+            color: rgba(255,255,255,0.3); font-size: 12px; pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -69,23 +48,7 @@
     <div id="crosshair"></div>
     <div id="interact-msg">INTERACT</div>
     <div id="trade-notif">ORDER EXECUTED</div>
-
-    <div id="hud">
-        <div class="hud-content">
-            <div class="title">VR FINANCIAL SIMULATOR</div>
-            <div class="instr">
-                <b>Controls:</b><br>
-                <span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span> to Move<br>
-                <span class="key">MOUSE</span> to Look<br>
-                <span class="key">CLICK</span> to Interact (Turn on PC, Trade)<br><br>
-                <b>Instructions:</b><br>
-                1. Sit at the desk.<br>
-                2. Click the RED switch to turn on monitors.<br>
-                3. Use Bottom screens to Trade.
-            </div>
-            <button id="start-btn">ENTER SIMULATION</button>
-        </div>
-    </div>
+    <div id="hint">CLICK ANYWHERE TO ENGAGE CONTROLS</div>
 
     <div id="container"></div>
 
@@ -136,36 +99,27 @@
         renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.getElementById('container').appendChild(renderer.domElement);
 
-        // --- CONTROLS LOGIC FIX ---
+        // --- CONTROLS LOGIC (UPDATED FOR NO BUTTON) ---
         const controls = new PointerLockControls(camera, document.body);
-        const startBtn = document.getElementById('start-btn');
-        const hud = document.getElementById('hud');
-        const crosshair = document.getElementById('crosshair');
+        const hint = document.getElementById('hint');
 
-        // Start Button Click (Initiates Lock)
-        startBtn.addEventListener('click', () => {
-            controls.lock();
-        });
-
-        // Hide HUD on Lock
-        controls.addEventListener('lock', () => {
-            hud.style.display = 'none';
-            crosshair.style.display = 'block';
-        });
-
-        // Show HUD on Unlock
-        controls.addEventListener('unlock', () => {
-            hud.style.display = 'flex';
-            crosshair.style.display = 'none';
-            document.querySelector('.title').innerText = "PAUSED";
-            startBtn.innerText = "RESUME";
-        });
-
-        // Interaction Click (Only works when locked)
-        document.addEventListener('click', () => {
-            if(controls.isLocked) {
+        // SINGLE EVENT LISTENER FOR EVERYTHING
+        document.body.addEventListener('click', () => {
+            if (!controls.isLocked) {
+                // If not locked, lock it (this is your "Start")
+                controls.lock();
+            } else {
+                // If already locked, this is an interaction (Buy/Sell/Switch)
                 checkInteraction();
             }
+        });
+
+        controls.addEventListener('lock', () => {
+            hint.style.opacity = 0; // Hide hint when active
+        });
+
+        controls.addEventListener('unlock', () => {
+            hint.style.opacity = 1; // Show hint if they pause
         });
 
         // Materials

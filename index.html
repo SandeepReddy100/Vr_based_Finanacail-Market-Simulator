@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR Financial Simulator - Full Environment</title>
+    <title>VR Financial Simulator - Ultimate</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', sans-serif; }
         
-        /* Cursor/Crosshair */
+        /* Green Crosshair */
         #crosshair {
             position: absolute; width: 10px; height: 10px;
             background: rgba(0, 255, 0, 0.8); border-radius: 50%;
@@ -17,6 +17,7 @@
             transform: translate(-50%, -50%);
         }
 
+        /* Heads Up Display */
         #hud {
             position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
             color: rgba(255, 255, 255, 0.6); font-size: 14px; pointer-events: none;
@@ -24,6 +25,7 @@
             text-shadow: 0 2px 4px #000;
         }
 
+        /* Notifications */
         #trade-notif {
             position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
             font-size: 24px; font-weight: 800; opacity: 0;
@@ -81,7 +83,7 @@
         scene.fog = new THREE.Fog(0x050505, 1, 60);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 200);
-        camera.position.set(0, 1.6, 3.5); // Start closer to desk
+        camera.position.set(0, 1.6, 3.5); // Sit at desk
         camera.lookAt(0, 1.6, 0); 
 
         const renderer = new THREE.WebGLRenderer({antialias:true, logarithmicDepthBuffer: true});
@@ -127,11 +129,14 @@
             return { canvas, ctx: canvas.getContext('2d'), tex };
         }
 
-        // --- SCREENS (Logic & UI) ---
+        // --- FULL SCREEN CLASSES (RESTORED VISUALS) ---
         class NetWorthScreen { 
-            constructor() { this.obj = createHDCanvas(800, 500); this.tick=0; this.net=18.50; this.updateUI(); } 
+            constructor() { this.obj = createHDCanvas(800, 500); this.tick=0; this.net=18.50; this.pred=24.20; this.updateUI(); } 
             updateUI() { 
                 const {ctx, tex} = this.obj; ctx.fillStyle='#111'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#888'; ctx.font='bold 28px Segoe UI'; ctx.fillText("NET WORTH", 40, 50); ctx.fillStyle='#2ecc71'; ctx.font='bold 70px Segoe UI'; ctx.fillText("₹ "+this.net.toFixed(2)+" L", 40, 120); 
+                const drawRow = (y, lbl, p, f, total) => { ctx.fillStyle='#333'; ctx.fillRect(40, y, 720, 40); ctx.fillStyle='#fff'; ctx.font='20px Segoe UI'; ctx.fillText(lbl, 60, y+28); ctx.fillStyle='#ccc'; ctx.fillText(`Self: ${p}`, 250, y+28); ctx.fillStyle='#2ecc71'; ctx.textAlign='right'; ctx.fillText(total, 740, y+28); ctx.textAlign='left'; }; 
+                drawRow(150, "Eq", "5.2L", "2.0L", "7.2 L"); drawRow(200, "MFs", "3.1L", "1.5L", "4.6 L"); drawRow(250, "Liq", "2.5L", "4.2L", "6.7 L"); 
+                ctx.fillStyle='#3498db'; ctx.font='bold 24px Segoe UI'; ctx.fillText("AI PREDICTION:", 40, 350); ctx.fillStyle='#fff'; ctx.font='bold 60px monospace'; ctx.fillText("₹ "+this.pred.toFixed(2)+" L", 40, 420); 
                 tex.needsUpdate=true; 
             } 
             update() { this.tick++; if(this.tick%200==0) { this.net += (Math.random()-0.4)*0.1; this.updateUI(); } } 
@@ -139,24 +144,45 @@
 
         class CalendarScreen { 
             constructor() { this.obj = createHDCanvas(800, 500); this.draw(); } 
-            draw() { const {ctx, tex} = this.obj; ctx.fillStyle='#fff'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#222'; ctx.font='bold 30px Segoe UI'; ctx.fillText("P&L CALENDAR", 40, 50); const months = ["JAN","FEB","MAR","APR"]; months.forEach((m,i)=>{ ctx.fillStyle='#eee'; ctx.fillRect(50+(i*180), 100, 150, 100); ctx.fillStyle='#000'; ctx.fillText(m, 60+(i*180), 150); }); tex.needsUpdate=true; } 
+            draw() { 
+                const {ctx, tex} = this.obj; ctx.fillStyle='#fff'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#222'; ctx.font='bold 30px Segoe UI'; ctx.fillText("P&L CALENDAR", 40, 50); 
+                const returns = [0.8, -0.2, 1.1, -0.5, 0.4, 1.2, -0.8, 0.9]; const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG"]; 
+                returns.forEach((val, i) => { 
+                    const r = Math.floor(i/4), c = i%4; const x = 50 + c*180, y = 100 + r*120; 
+                    ctx.fillStyle = val >= 0 ? `rgba(46, 204, 113, 0.3)` : `rgba(231, 76, 60, 0.3)`; ctx.fillRect(x, y, 160, 100); 
+                    ctx.fillStyle='#111'; ctx.font='bold 20px Segoe UI'; ctx.fillText(months[i], x+10, y+30); 
+                    ctx.fillStyle = val>=0?'#004400':'#440000'; ctx.font='bold 28px Segoe UI'; ctx.textAlign='right'; ctx.fillText("₹"+val+"L", x+150, y+60); ctx.textAlign='left';
+                }); 
+                tex.needsUpdate=true; 
+            } 
             update() {} 
         }
 
         class NewsScreen { 
-            constructor() { this.obj = createHDCanvas(800, 500); this.news = [{h: "RBI REPO RATE 6.5%", d: "No Change."}, {h: "AUTO SALES UP 12%", d: "Festival demand."}]; this.idx = 0; this.timer = 0; } 
-            update() { this.timer++; if(this.timer % 300 === 0) { this.idx = (this.idx + 1) % this.news.length; const item = this.news[this.idx]; const {ctx, tex} = this.obj; ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#c0392b'; ctx.fillRect(0,0,800,100); ctx.fillStyle='#fff'; ctx.font='bold 40px Impact'; ctx.fillText("NEWS", 40, 65); ctx.fillStyle='#111'; ctx.font='bold 50px Segoe UI'; ctx.fillText(item.h, 40, 180); tex.needsUpdate=true; } } 
+            constructor() { this.obj = createHDCanvas(800, 500); this.news = [{h: "RBI REPO RATE 6.5%", d: "No Change."}, {h: "AUTO SALES UP 12%", d: "Festival demand."}, {h: "IT SECTOR DRAGS", d: "US Recession."}]; this.idx = 0; this.timer = 0; } 
+            update() { 
+                this.timer++; 
+                if(this.timer % 300 === 0 || this.timer === 1) { 
+                    const item = this.news[this.idx]; const {ctx, tex} = this.obj; ctx.fillStyle='#f0f0f0'; ctx.fillRect(0,0,800,500); 
+                    ctx.fillStyle='#c0392b'; ctx.fillRect(0,0,800,100); ctx.fillStyle='#fff'; ctx.font='bold 40px Impact'; ctx.fillText("NEWS", 40, 65); 
+                    ctx.fillStyle='#111'; ctx.font='bold 50px Segoe UI'; ctx.fillText(item.h, 40, 180); ctx.fillStyle='#333'; ctx.font='28px Segoe UI'; ctx.fillText(item.d, 40, 240);
+                    this.idx = (this.idx + 1) % this.news.length; tex.needsUpdate=true; 
+                } 
+            } 
         }
 
         class AIMarketWatch {
             constructor() { this.obj = createHDCanvas(800, 500); this.timer=0; this.draw(); }
             draw() {
                 const {ctx, tex} = this.obj; ctx.fillStyle='#050505'; ctx.fillRect(0,0,800,500); ctx.fillStyle='#0f0'; ctx.font='bold 32px monospace'; ctx.fillText("AI SCANNER", 30, 50);
+                ctx.fillStyle='#555'; ctx.font='bold 20px Segoe UI'; ctx.fillText("SCRIPT", 30, 100); ctx.fillText("TARGET", 250, 100); ctx.fillText("CONF", 450, 100); ctx.fillText("QTY", 650, 100);
                 let y = 160;
                 marketData.forEach((d, i) => {
                     if (i === currentStockIndex) { ctx.fillStyle='#003366'; ctx.fillRect(0, y-40, 800, 60); ctx.strokeStyle='#00ffff'; ctx.lineWidth=2; ctx.strokeRect(2, y-40, 796, 60); }
                     ctx.fillStyle='#fff'; ctx.font='bold 24px monospace'; ctx.fillText(d.n, 30, y);
                     ctx.fillStyle='#00ffff'; ctx.fillText((d.p*1.05).toFixed(1), 250, y);
+                    const col = d.c > 90 ? '#2ecc71' : '#f1c40f'; ctx.fillStyle=col; ctx.fillRect(450, y-15, d.c*1.5, 15);
+                    ctx.fillStyle='#ccc'; ctx.fillText(d.q, 650, y);
                     y += 80;
                 });
                 tex.needsUpdate=true;
@@ -169,8 +195,8 @@
             draw() {
                 const stock = marketData[currentStockIndex];
                 const {ctx, tex} = this.obj; ctx.fillStyle='#101418'; ctx.fillRect(0,0,800,500);
-                ctx.fillStyle='#fff'; ctx.font='bold 40px Segoe UI'; ctx.fillText(stock.n, 40, 60);
-                ctx.fillStyle='#fff'; ctx.font='bold 80px monospace'; ctx.fillText(stock.p.toFixed(2), 40, 160);
+                ctx.fillStyle='#fff'; ctx.font='bold 40px Segoe UI'; ctx.fillText(stock.n, 40, 60); ctx.fillStyle='#aaa'; ctx.font='24px Segoe UI'; ctx.fillText("NSE • LIVE", 350, 60);
+                ctx.fillStyle='#fff'; ctx.font='bold 80px monospace'; ctx.fillText(stock.p.toFixed(2), 40, 160); ctx.fillStyle='#2ecc71'; ctx.font='30px monospace'; ctx.fillText("▲ +1.2%", 400, 160);
                 ctx.fillStyle='#2ecc71'; ctx.fillRect(40, 300, 340, 100); ctx.fillStyle='#004d00'; ctx.font='bold 50px Segoe UI'; ctx.textAlign='center'; ctx.fillText("BUY", 210, 365);
                 ctx.fillStyle='#e74c3c'; ctx.fillRect(420, 300, 340, 100); ctx.fillStyle='#4d0000'; ctx.fillText("SELL", 590, 365); ctx.textAlign='left';
                 tex.needsUpdate=true;
@@ -185,20 +211,46 @@
                 if(this.timer % 3 === 0 || force) {
                     const last = this.data[this.data.length-1]; let next = last + (Math.random()-0.5) * 20; if(next < 50) next = 50; if(next > 450) next = 450; this.data.shift(); this.data.push(next);
                     const {ctx, tex} = this.obj; const w=800, h=500; ctx.fillStyle='#101010'; ctx.fillRect(0,0,w,h);
-                    ctx.beginPath(); ctx.strokeStyle = '#2ecc71'; ctx.lineWidth = 3; this.data.forEach((v, i) => i===0 ? ctx.moveTo(i*10, h-v) : ctx.lineTo(i*10, h-v)); ctx.stroke();
+                    const col = next > this.data[0] ? '#2ecc71' : '#e74c3c';
+                    const grd = ctx.createLinearGradient(0,0,0,h); grd.addColorStop(0, col); grd.addColorStop(1, "rgba(0,0,0,0)");
+                    ctx.beginPath(); ctx.moveTo(0, h); this.data.forEach((v, i) => ctx.lineTo(i*10, h-v)); ctx.lineTo(w, h); ctx.fillStyle = grd; ctx.globalAlpha = 0.3; ctx.fill(); ctx.globalAlpha = 1.0;
+                    ctx.beginPath(); ctx.strokeStyle = col; ctx.lineWidth = 3; this.data.forEach((v, i) => i===0 ? ctx.moveTo(i*10, h-v) : ctx.lineTo(i*10, h-v)); ctx.stroke();
+                    ctx.fillStyle='#fff'; ctx.font='bold 24px Segoe UI'; ctx.fillText(marketData[currentStockIndex].n + " (LIVE)", 20, 40);
                     tex.needsUpdate=true;
                 }
             }
         }
 
+        // --- WALL POSTER VISUALS ---
         class LearningScreen {
             constructor() { this.obj = createHDCanvas(500, 750); this.draw(); }
-            draw() { const {ctx, tex} = this.obj; ctx.fillStyle='#2c3e50'; ctx.fillRect(0,0,500,750); ctx.fillStyle='#fff'; ctx.font='30px Impact'; ctx.fillText("LEARNING CENTER", 50, 50); tex.needsUpdate=true; }
+            draw() { 
+                const {ctx, tex} = this.obj; ctx.fillStyle='#2c3e50'; ctx.fillRect(0,0,500,750); ctx.fillStyle='#ecf0f1'; ctx.fillRect(20,20,460,710);
+                ctx.fillStyle='#333'; ctx.font='bold 36px Impact'; ctx.textAlign='center'; ctx.fillText("CANDLESTICK BASICS", 250, 80);
+                // Bullish Candle
+                ctx.fillStyle='#27ae60'; ctx.fillRect(150, 200, 50, 150); ctx.fillRect(170, 150, 10, 250);
+                // Bearish Candle
+                ctx.fillStyle='#c0392b'; ctx.fillRect(300, 250, 50, 150); ctx.fillRect(320, 200, 10, 250);
+                ctx.fillStyle='#555'; ctx.font='20px Segoe UI'; ctx.fillText("Bullish vs Bearish Patterns", 250, 550);
+                tex.needsUpdate=true; 
+            }
             update() {}
         }
         class JourneyScreen {
             constructor() { this.obj = createHDCanvas(500, 750); this.draw(); }
-            draw() { const {ctx, tex} = this.obj; ctx.fillStyle='#0f172a'; ctx.fillRect(0,0,500,750); ctx.fillStyle='#f1c40f'; ctx.font='30px Impact'; ctx.fillText("MY JOURNEY", 50, 50); tex.needsUpdate=true; }
+            draw() { 
+                const {ctx, tex} = this.obj; ctx.fillStyle='#0f172a'; ctx.fillRect(0,0,500,750); 
+                ctx.fillStyle='#f1c40f'; ctx.font='bold 40px Impact'; ctx.textAlign='center'; ctx.fillText("MY JOURNEY", 250, 60);
+                ctx.strokeStyle='#3498db'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(50, 100); ctx.lineTo(50, 700); ctx.stroke();
+                const milestones = [{y:"2018",t:"Start"}, {y:"2020",t:"Learning"}, {y:"2022",t:"Profitable"}, {y:"2025",t:"Target Hit"}];
+                ctx.textAlign='left'; let y = 120;
+                milestones.forEach(m => {
+                    ctx.fillStyle='#2ecc71'; ctx.beginPath(); ctx.arc(50, y, 8, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle='#3498db'; ctx.font='bold 24px monospace'; ctx.fillText(m.y, 80, y+8);
+                    ctx.fillStyle='#ccc'; ctx.font='20px Segoe UI'; ctx.fillText(m.t, 160, y+8); y += 100;
+                });
+                tex.needsUpdate=true; 
+            }
             update() {}
         }
 
@@ -206,7 +258,7 @@
         screenInstances.forEach(s => textureUpdaters.push(s));
         const screenMeshes = [];
 
-        // --- 3. SCENE CONSTRUCTION (RESTORED) ---
+        // --- 3. SCENE CONSTRUCTION ---
         
         // ROOM
         const room = new THREE.Group();
@@ -235,7 +287,7 @@
         }
         scene.add(exterior);
 
-        // WALL SCREENS (Learning/Journey)
+        // WALL SCREENS (Added Back)
         const learningScreen = new LearningScreen(); textureUpdaters.push(learningScreen);
         const lsMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 2.4), new THREE.MeshBasicMaterial({map: learningScreen.obj.tex}));
         lsMesh.position.set(-9.7, 3.5, 2); lsMesh.rotation.y=Math.PI/2; scene.add(lsMesh);
